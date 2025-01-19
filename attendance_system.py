@@ -2,9 +2,10 @@ import cv2
 import numpy as np
 import face_recognition
 import os
-from datetime import datetime, time as time_module
+from datetime import datetime
 import pandas as pd
 import threading
+import time
 
 # Path to the Known Faces directory
 path = 'KnownFaces'
@@ -33,102 +34,113 @@ for student_name in student_folders:
 # Load the timetable
 timetable = pd.read_csv('TimeTable.csv')
 
-# Initialize an empty DataFrame for attendance
-attendance = pd.DataFrame(columns=['Name', 'Date', 'Time', 'Period'])
+# Create a class to handle attendance
+class AttendanceSystem:
+    def __init__(self):
+        self.attendance = pd.DataFrame(columns=['Name', 'Date', 'Time', 'Period'])
+        self.lock = threading.Lock()
+        self.video_capture = cv2.VideoCapture(0)
+        self.running = True
 
-# Function to check if the current time is within a class period
-def is_class_time():
-    now = datetime.now().time()
-    for index, row in timetable.iterrows():
-        start_time = datetime.strptime(row['Start_Time'], "%H:%M:%S").time()
-        end_time = datetime.strptime(row['End_Time'], "%H:%M:%S").time()
-        if start_time <= now <= end_time:
-            return True, row['Period']
-    return False, None
+    def is_class_time(self):
+        now_time = datetime.now().time()
+        for index, row in timetable.iterrows():
+            start_time = datetime.strptime(row['Start_Time'], "%H:%M:%S").time()
+            end_time = datetime.strptime(row['End_Time'], "%H:%M:%S").time()
+            if start_time <= now_time <= end_time:
+                return True, row['Period']
+        return False, None
 
-# Initialize webcam
-video_capture = cv2.VideoCapture(0)
+    def mark_attendance(self, period):
+        print(f"Starting attendance marking for Period {period}")
+        end_time_str = timetable.loc[timetable['Period'] == period]['End_Time'].values[0]
+        end_time = datetime.strptime(end_time_str, "%H:%M:%S").time()
 
-# Function to mark attendance
-def mark_attendance(period):
-    print(f"Marking attendance for Period {period}")
-    end_time = datetime.strptime(timetable.loc[timetable['Period'] == period]['End_Time'].values[0], "%H:%M:%S").time()
+        while datetime.now().time() <= end_time and self.running:
+            ret, frame = self.video_capture.read()
+            if not ret:
+                print("Failed to capture frame from camera.")
+                break
 
-    while datetime.now().time() <= end_time:
-        # Capture a single frame from the webcam
-        ret, frame = video_capture.read()
-        if not ret:
-            print("Failed to capture frame from camera.")
-            break
+            small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+            rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+            face_locations = face_recognition.face_locations(rgb_small_frame)
+            face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
 
-        # Resize frame for faster processing
-        small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+            for face_encoding, face_location in zip(face_encodings, face_locations):
+                matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
+                name = "Unknown"
 
-        # Convert BGR to RGB
-        rgb_small_frame = small_frame[:, :, ::-1]
+                if len(known_face_encodings) > 0:
+                    face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
+                    best_match_index = np.argmin(face_distances)
+                    if matches[best_match_index]:
+                        name = known_face_names[best_match_index]
+                        now = datetime.now()
+                        date_string = now.strftime("%Y-%m-%d")
+                        time_string = now.strftime("%H:%M:%S")
 
-        # Find face locations
-        face_locations = face_recognition.face_locations(rgb_small_frame)
+                        with self.lock:
+                            if not ((self.attendance['Name'] == name) & 
+                                  (self.attendance['Date'] == date_string) & 
+                                  (self.attendance['Period'] == period)).any():
+                                new_entry = pd.DataFrame([{
+                                    'Name': name,
+                                    'Date': date_string,
+                                    'Time': time_string,
+                                    'Period': period
+                                }])
+                                self.attendance = pd.concat([self.attendance, new_entry], ignore_index=True)
+                                print(f'Attendance marked for {name} at {time_string} during Period {period}')
 
-        # Get face encodings
-        face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
+            time.sleep(1)
 
-        # Loop through each face in the frame
-        for face_encoding, face_location in zip(face_encodings, face_locations):
-            # Compare face encodings with known faces
-            matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
-            name = "Unknown"
+        print(f"Finished attendance marking for Period {period}")
 
-            face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
-            best_match_index = np.argmin(face_distances)
-            if matches[best_match_index]:
-                name = known_face_names[best_match_index]
+    def schedule_attendance(self):
+        while self.running:
+            try:
+                class_in_session, current_period = self.is_class_time()
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] Checking class time: "
+                      f"class_in_session={class_in_session}, current_period={current_period}")
+                
+                if class_in_session:
+                    self.mark_attendance(current_period)
+                    time.sleep(60)
+                else:
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] No class in session. Sleeping for 60 seconds.")
+                    time.sleep(60)
+            except Exception as e:
+                print(f"Exception in schedule_attendance: {e}")
+                break
 
-                # Mark attendance
-                now = datetime.now()
-                date_string = now.strftime("%Y-%m-%d")
-                time_string = now.strftime("%H:%M:%S")
+    def save_attendance(self):
+        attendance_file = 'Attendance.csv'
+        with self.lock:
+            if os.path.exists(attendance_file):
+                self.attendance.to_csv(attendance_file, mode='a', header=False, index=False)
+            else:
+                self.attendance.to_csv(attendance_file, index=False)
 
-                # Check if the student is already marked present for the current period
-                if not ((attendance['Name'] == name) & (attendance['Date'] == date_string) & (attendance['Period'] == period)).any():
-                    new_entry = {'Name': name, 'Date': date_string, 'Time': time_string, 'Period': period}
-                    attendance = attendance.append(new_entry, ignore_index=True)
-                    print(f'Attendance marked for {name} at {time_string} during Period {period}')
+    def cleanup(self):
+        self.running = False
+        self.video_capture.release()
+        cv2.destroyAllWindows()
 
-        # Wait for a short period before capturing the next frame
-        cv2.waitKey(1)
-
-# Function to schedule attendance marking
-def schedule_attendance():
-    while True:
-        class_in_session, current_period = is_class_time()
-        if class_in_session:
-            mark_attendance(current_period)
-            # Sleep until the next minute to avoid redundant checks
-            time_module.sleep(60)
-        else:
-            # Sleep for a minute before checking again
-            time_module.sleep(60)
+# Create instance of AttendanceSystem
+attendance_system = AttendanceSystem()
 
 # Start the scheduling in a separate thread
-attendance_thread = threading.Thread(target=schedule_attendance)
+attendance_thread = threading.Thread(target=attendance_system.schedule_attendance)
 attendance_thread.start()
 
 try:
     while True:
-        # Keep the main thread running
-        time_module.sleep(1)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Main thread running...")
+        time.sleep(60)
 except KeyboardInterrupt:
     print("Exiting program and saving attendance...")
-    # Save the attendance DataFrame to a CSV file
-    attendance_file = 'Attendance.csv'
-    if os.path.exists(attendance_file):
-        attendance.to_csv(attendance_file, mode='a', header=False, index=False)
-    else:
-        attendance.to_csv(attendance_file, index=False)
-    print("Attendance saved to Attendance.csv")
-    # Release webcam and close any OpenCV windows
-    video_capture.release()
-    cv2.destroyAllWindows()
-    # Stop the attendance thread
+    attendance_system.cleanup()
+    attendance_system.save_attendance()
     attendance_thread.join()
+    print("Program exited gracefully.")
