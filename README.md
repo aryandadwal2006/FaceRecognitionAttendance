@@ -1,4 +1,5 @@
 Face Recognition Attendance System
+
 This project is a Face Recognition Attendance System that automates attendance marking using facial recognition technology. It utilizes a webcam or CCTV camera to detect and recognize faces of students and marks their attendance based on a predefined timetable.
 
 Table of Contents
