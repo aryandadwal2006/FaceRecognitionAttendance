@@ -28,7 +28,7 @@ Follow these steps to set up and run the project on your local machine.
 1. Clone the Repository
 BASH
 
-git clone https://github.com/yourusername/FaceRecognitionAttendance.git
+git clone https://github.com/aryandadwal2006/FaceRecognitionAttendance.git
 cd FaceRecognitionAttendance
 2. Create a Virtual Environment (Optional but Recommended)
 Create a virtual environment to manage project dependencies.
