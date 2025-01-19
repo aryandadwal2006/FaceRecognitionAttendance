@@ -119,6 +119,9 @@ class AttendanceSystem:
                 font = cv2.FONT_HERSHEY_DUPLEX
                 cv2.putText(frame, name, (left + 6, bottom - 6), font, 0.6, (255, 255, 255), 1)
 
+            # Add period information to the frame
+            cv2.putText(frame, f"Period: {period}", (10, 30), cv2.FONT_HERSHEY_DUPLEX, 1, (0, 255, 0), 1)
+            
             # Display the resulting frame
             cv2.imshow('Attendance System', frame)
 
@@ -140,7 +143,7 @@ class AttendanceSystem:
         while self.running:
             try:
                 if time.time() - start_time > timeout:
-                    print("Timeout reached while waiting for Period 1")
+                    print("Timeout reached")
                     self.running = False
                     break
 
@@ -148,11 +151,11 @@ class AttendanceSystem:
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Checking class time: "
                       f"class_in_session={class_in_session}, current_period={current_period}")
                 
-                if class_in_session and current_period == 1:  # Only run for period 1
+                if class_in_session:
                     self.mark_attendance(current_period)
-                    break  # Exit after period 1
+                    break
                 else:
-                    print(f"[{datetime.now().strftime('%H:%M:%S')}] Waiting for Period 1. Sleeping for 60 seconds.")
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] No class in session. Sleeping for 60 seconds.")
                     time.sleep(60)
             except Exception as e:
                 print(f"Exception in schedule_attendance: {e}")
@@ -183,7 +186,7 @@ def main():
 
         while attendance_system.running:
             if attendance_system.period_completed.is_set():
-                print("Period 1 completed. Shutting down...")
+                print(f"Period completed. Shutting down...")
                 break
             time.sleep(1)
 
